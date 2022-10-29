@@ -1,6 +1,17 @@
 #!/bin/bash -eu
 
-if [ ! -x /root/bin/tesla_api.py ] || [ ! -s /mutable/cache.json ]
+
+if [ "${TESLA_WAKE_MODE}" == "tessie" ]
+then
+  # We could use TESLA_VIN also, but better to keep them seperate
+  if [ -z "${TESSIE_VIN}" ] || [ -z "${TESSIE_API_KEY}" ]
+  then
+    log "Tessie Variables not set - not keeping car awake"
+    exit
+  else
+    log "Keeping car awake using Tessie"
+  fi
+elif [ ! -x /root/bin/tesla_api.py ] || [ ! -s /mutable/cache.json ]
 then
   log "not keeping car awake."
   exit
@@ -19,6 +30,20 @@ function ping {
   done
 }
 
+function wake_tessie {
+  while true
+  do
+    # this will print a json response if online, else timeout after 30 seconds
+    if curl --request GET --url https://api.tessie.com/${TESSIE_VIN}/wake --header "authorization: Bearer ${TESSIE_API_KEY}"
+    then
+      sleep 90
+    else
+      log "failed to contact car via tessie, retrying"
+      sleep 5
+    fi
+  done
+}
+
 case "${TESLA_WAKE_MODE:-stream}" in
   sentry)
     is_sentry_mode_enabled=$(/root/bin/tesla_api.py is_sentry_mode_enabled | tr '[:upper:]' '[:lower:]')
@@ -29,6 +54,11 @@ case "${TESLA_WAKE_MODE:-stream}" in
       /root/bin/tesla_api.py enable_sentry_mode &>> "${LOG_FILE}"
     fi
     ;;
+  tessie)
+    log "Starting Tessie background task to keep car awake."
+    wake_tessie &
+    echo $! > /tmp/keep_awake_task_pid
+  ;;
   stream)
     log "Starting background task to keep car awake."
     ping &
